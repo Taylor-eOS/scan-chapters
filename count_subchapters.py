@@ -1,4 +1,6 @@
-file_path = "input.txt"
+from settings import BOOK_PATH
+
+file_path = BOOK_PATH
 report_path = "subchapter_report.txt"
 
 def percentile(sorted_data, p):
@@ -19,13 +21,13 @@ def count_words_per_subchapter(file_path, report_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.rstrip('\n')
-            if line.startswith('||'):
+            if line.startswith('|'):
                 if current_block_lines:
                     current_subchapters.append(' '.join(current_block_lines))
                     current_block_lines = []
                 if current_subchapters or current_chapter != "(preamble)":
                     chapters.append((current_chapter, current_subchapters))
-                title_text = line[2:].strip() or "(no title)"
+                title_text = line[1:].strip() or "(no title)"
                 current_chapter = title_text
                 current_subchapters = []
             elif line.strip() == '':

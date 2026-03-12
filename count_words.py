@@ -1,7 +1,7 @@
 from settings import BOOK_PATH
 
 filename = BOOK_PATH
-MAX_SHOWN = 20
+MAX_SHOWN = 25
 
 def read_and_split_segments(filename):
     with open(filename, 'r', encoding='utf-8') as f:
@@ -12,8 +12,8 @@ def read_and_split_segments(filename):
         seg = seg.strip()
         if not seg:
             continue
-        if seg.startswith('||'):
-            pos = seg.find('|', 2)
+        if seg.startswith('|'):
+            pos = seg.find('|', 1)
             if pos != -1:
                 seg = seg[pos+1:].lstrip()
         if seg:
@@ -70,3 +70,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
