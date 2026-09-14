@@ -9,6 +9,7 @@ long_line_ratio = 2.0
 long_line_fraction_threshold = 0.4
 global_low_ratio = 0.3
 global_high_ratio = 2.5
+top_longest_lines_count = 20
 
 def percentile(sorted_data, p):
     if not sorted_data:
@@ -89,10 +90,19 @@ def compute_global_stats(all_word_counts):
 def compute_segment_means(segments):
     return [mean_and_stdev([len(line.split()) for line in lines])[0] for lines in segments]
 
+def collect_longest_lines(segments):
+    entries = []
+    for seg_idx, lines in enumerate(segments, 1):
+        for line_idx, line in enumerate(lines, 1):
+            entries.append((len(line.split()), seg_idx, line_idx, line))
+    entries.sort(key=lambda entry: entry[0], reverse=True)
+    return entries[:top_longest_lines_count]
+
 def write_report(report_path, segments, stats):
     flagged_segments = []
     segment_means = compute_segment_means(segments)
     reference_mean = percentile(sorted(segment_means), 50)
+    longest_lines = collect_longest_lines(segments)
     with open(report_path, 'w', encoding='utf-8') as out:
         for seg_idx, lines in enumerate(segments, 1):
             word_counts = [len(line.split()) for line in lines]
@@ -115,6 +125,10 @@ def write_report(report_path, segments, stats):
         if flagged_segments:
             ids = ', '.join(str(i) for i in flagged_segments)
             out.write(f"Flagged segment numbers: {ids}\n")
+        out.write(f"\n--- Top {len(longest_lines)} Longest Lines ---\n")
+        for count, seg_idx, line_idx, line in longest_lines:
+            preview = line[:100] + ('...' if len(line) > 100 else '')
+            out.write(f"[{count}] segment {seg_idx}, line {line_idx}: {preview}\n")
 
 def analyze_line_lengths(file_path, report_path):
     segments = read_segments(file_path)
