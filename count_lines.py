@@ -2,8 +2,13 @@ from settings import BOOK_PATH
 
 file_path = BOOK_PATH
 report_path = "line_report.txt"
-neighbor_jump_ratio = 2.5
-neighbor_jump_min_diff = 6
+cv_flag_threshold = 0.6
+short_line_ratio = 0.5
+short_line_fraction_threshold = 0.4
+long_line_ratio = 2.0
+long_line_fraction_threshold = 0.4
+global_low_ratio = 0.3
+global_high_ratio = 2.5
 
 def percentile(sorted_data, p):
     if not sorted_data:
@@ -15,20 +20,59 @@ def percentile(sorted_data, p):
         return sorted_data[lo]
     return sorted_data[lo] + (idx - lo) * (sorted_data[hi] - sorted_data[lo])
 
-def read_lines(file_path):
-    lines = []
+def read_segments(file_path):
+    segments = []
+    current_lines = []
     with open(file_path, 'r', encoding='utf-8') as f:
         for raw_line in f:
             stripped = raw_line.rstrip('\n').strip()
             if stripped == '' or stripped.startswith('|'):
+                if current_lines:
+                    segments.append(current_lines)
+                    current_lines = []
                 continue
-            lines.append(stripped)
-    return lines
+            current_lines.append(stripped)
+    if current_lines:
+        segments.append(current_lines)
+    return segments
 
-def compute_stats(word_counts):
-    sorted_counts = sorted(word_counts)
-    total_lines = len(word_counts)
-    total_words = sum(word_counts)
+def mean_and_stdev(word_counts):
+    n = len(word_counts)
+    if n == 0:
+        return 0, 0
+    mean = sum(word_counts) / n
+    if n == 1:
+        return mean, 0
+    variance = sum((c - mean) ** 2 for c in word_counts) / n
+    return mean, variance ** 0.5
+
+def evaluate_segment(word_counts, global_mean):
+    mean, stdev = mean_and_stdev(word_counts)
+    cv = stdev / mean if mean > 0 else 0
+    short_cutoff = mean * short_line_ratio
+    long_cutoff = mean * long_line_ratio
+    n = len(word_counts)
+    short_fraction = sum(1 for c in word_counts if c < short_cutoff) / n if n else 0
+    long_fraction = sum(1 for c in word_counts if c > long_cutoff) / n if n else 0
+    global_low_cutoff = global_mean * global_low_ratio
+    global_high_cutoff = global_mean * global_high_ratio
+    reasons = []
+    if cv >= cv_flag_threshold and n >= 3:
+        reasons.append(f"high variance (cv={cv:.2f})")
+    if short_fraction >= short_line_fraction_threshold and n >= 3:
+        reasons.append(f"over-split ({short_fraction * 100:.0f}% of lines under {short_cutoff:.1f} words)")
+    if long_fraction >= long_line_fraction_threshold and n >= 3:
+        reasons.append(f"under-split ({long_fraction * 100:.0f}% of lines over {long_cutoff:.1f} words)")
+    if global_mean > 0 and mean < global_low_cutoff:
+        reasons.append(f"segment mean ({mean:.1f}) far below typical segment ({global_mean:.1f})")
+    if global_mean > 0 and mean > global_high_cutoff:
+        reasons.append(f"segment mean ({mean:.1f}) far above typical segment ({global_mean:.1f})")
+    return mean, stdev, cv, reasons
+
+def compute_global_stats(all_word_counts):
+    sorted_counts = sorted(all_word_counts)
+    total_lines = len(all_word_counts)
+    total_words = sum(all_word_counts)
     mean = total_words / total_lines if total_lines else 0
     stats = {
         'total_lines': total_lines,
@@ -37,109 +81,46 @@ def compute_stats(word_counts):
         'median': percentile(sorted_counts, 50),
         'q1': percentile(sorted_counts, 25),
         'q3': percentile(sorted_counts, 75),
-        'low_fence': percentile(sorted_counts, 10),
-        'high_fence': percentile(sorted_counts, 90),
-        'min': min(word_counts) if word_counts else 0,
-        'max': max(word_counts) if word_counts else 0,
+        'min': min(all_word_counts) if all_word_counts else 0,
+        'max': max(all_word_counts) if all_word_counts else 0,
     }
     return stats
 
-def is_neighbor_jump(word_counts, idx):
-    count = word_counts[idx]
-    neighbors = []
-    if idx > 0:
-        neighbors.append(word_counts[idx - 1])
-    if idx < len(word_counts) - 1:
-        neighbors.append(word_counts[idx + 1])
-    if not neighbors:
-        return False
-    for neighbor in neighbors:
-        diff = abs(count - neighbor)
-        if diff < neighbor_jump_min_diff:
-            continue
-        smaller = min(count, neighbor) if min(count, neighbor) > 0 else 1
-        ratio = max(count, neighbor) / smaller
-        if ratio >= neighbor_jump_ratio:
-            return True
-    return False
+def compute_segment_means(segments):
+    return [mean_and_stdev([len(line.split()) for line in lines])[0] for lines in segments]
 
-def classify_lines(lines, word_counts, stats):
-    flags = []
-    for idx in range(len(lines)):
-        count = word_counts[idx]
-        if count < stats['low_fence']:
-            flags.append('short')
-        elif count > stats['high_fence']:
-            flags.append('long')
-        elif is_neighbor_jump(word_counts, idx):
-            flags.append('jump')
-        else:
-            flags.append(None)
-    return flags
-
-def find_runs(flags, categories):
-    runs = []
-    run_start = None
-    for idx, flag in enumerate(flags):
-        if flag in categories:
-            if run_start is None:
-                run_start = idx
-            run_end = idx
-        else:
-            if run_start is not None:
-                runs.append((run_start, run_end))
-                run_start = None
-    if run_start is not None:
-        runs.append((run_start, run_end))
-    return runs
-
-def write_report(report_path, lines, word_counts, flags, stats):
-    flag_symbols = {'short': '-', 'long': '+', 'jump': '~'}
+def write_report(report_path, segments, stats):
+    flagged_segments = []
+    segment_means = compute_segment_means(segments)
+    reference_mean = percentile(sorted(segment_means), 50)
     with open(report_path, 'w', encoding='utf-8') as out:
-        for idx, line in enumerate(lines):
-            count = word_counts[idx]
-            flag = flags[idx]
-            symbol = flag_symbols.get(flag, ' ')
-            preview = line[:100] + ('...' if len(line) > 100 else '')
-            out.write(f" {symbol}{idx + 1}. [{count}]  {preview}\n")
+        for seg_idx, lines in enumerate(segments, 1):
+            word_counts = [len(line.split()) for line in lines]
+            mean, stdev, cv, reasons = evaluate_segment(word_counts, reference_mean)
+            marker = '*' if reasons else ' '
+            out.write(f"{marker}[{seg_idx}] {len(lines)} lines, mean {mean:.1f} words/line, stdev {stdev:.1f}, cv {cv:.2f}\n")
+            if reasons:
+                for reason in reasons:
+                    out.write(f"    - {reason}\n")
+                flagged_segments.append(seg_idx)
+            for line_idx, line in enumerate(lines, 1):
+                count = word_counts[line_idx - 1]
+                preview = line[:100] + ('...' if len(line) > 100 else '')
+                out.write(f"    {line_idx}. [{count}]  {preview}\n")
         out.write(f"\n--- Summary ---\n")
-        out.write(f"Lines: {stats['total_lines']}  Total words: {stats['total_words']}\n")
+        out.write(f"Segments: {len(segments)}  Lines: {stats['total_lines']}  Total words: {stats['total_words']}\n")
         out.write(f"Mean: {stats['mean']:.1f}  Median: {stats['median']:.1f}  Min: {stats['min']}  Max: {stats['max']}\n")
-        out.write(f"Q1: {stats['q1']:.1f}  Q3: {stats['q3']:.1f}  P10: {stats['low_fence']:.1f}  P90: {stats['high_fence']:.1f}\n")
-        n_short = sum(1 for f in flags if f == 'short')
-        n_long = sum(1 for f in flags if f == 'long')
-        n_jump = sum(1 for f in flags if f == 'jump')
-        out.write(f"Flagged short (-): {n_short} lines below P10 ({stats['low_fence']:.1f} words)\n")
-        out.write(f"Flagged long (+): {n_long} lines above P90 ({stats['high_fence']:.1f} words)\n")
-        out.write(f"Flagged local jump (~): {n_jump} lines diverging sharply from a neighbor\n")
-        short_runs = find_runs(flags, {'short'})
-        if short_runs:
-            out.write(f"\n--- Consecutive short line runs ---\n")
-            for start, end in short_runs:
-                length = end - start + 1
-                loc = f"line {start + 1}" if length == 1 else f"lines {start + 1}-{end + 1}"
-                out.write(f"  {length}x  {loc}\n")
-        long_runs = find_runs(flags, {'long'})
-        if long_runs:
-            out.write(f"\n--- Consecutive long line runs ---\n")
-            for start, end in long_runs:
-                length = end - start + 1
-                loc = f"line {start + 1}" if length == 1 else f"lines {start + 1}-{end + 1}"
-                out.write(f"  {length}x  {loc}\n")
-        irregular_runs = find_runs(flags, {'short', 'long', 'jump'})
-        if irregular_runs:
-            out.write(f"\n--- Consecutive irregular line runs (any flag) ---\n")
-            for start, end in irregular_runs:
-                length = end - start + 1
-                loc = f"line {start + 1}" if length == 1 else f"lines {start + 1}-{end + 1}"
-                out.write(f"  {length}x  {loc}\n")
+        out.write(f"Q1: {stats['q1']:.1f}  Q3: {stats['q3']:.1f}\n")
+        out.write(f"Flagged segments: {len(flagged_segments)} of {len(segments)}\n")
+        if flagged_segments:
+            ids = ', '.join(str(i) for i in flagged_segments)
+            out.write(f"Flagged segment numbers: {ids}\n")
 
 def analyze_line_lengths(file_path, report_path):
-    lines = read_lines(file_path)
-    word_counts = [len(line.split()) for line in lines]
-    stats = compute_stats(word_counts)
-    flags = classify_lines(lines, word_counts, stats)
-    write_report(report_path, lines, word_counts, flags, stats)
+    segments = read_segments(file_path)
+    all_word_counts = [len(line.split()) for lines in segments for line in lines]
+    stats = compute_global_stats(all_word_counts)
+    write_report(report_path, segments, stats)
     print(f"Report written to {report_path}")
 
 if __name__ == "__main__":
