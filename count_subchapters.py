@@ -2,6 +2,7 @@ from settings import BOOK_PATH
 
 file_path = BOOK_PATH
 report_path = "subchapter_report.txt"
+top_n_longest = 10
 
 def percentile(sorted_data, p):
     if not sorted_data:
@@ -30,6 +31,10 @@ def count_words_per_subchapter(file_path, report_path):
                 title_text = line[1:].strip() or "(no title)"
                 current_chapter = title_text
                 current_subchapters = []
+            elif line.startswith('['):
+                if current_block_lines:
+                    current_subchapters.append(' '.join(current_block_lines))
+                    current_block_lines = []
             elif line.strip() == '':
                 if current_block_lines:
                     current_subchapters.append(' '.join(current_block_lines))
@@ -49,8 +54,8 @@ def count_words_per_subchapter(file_path, report_path):
     q3 = percentile(sorted_counts, 75)
     low_fence = percentile(sorted_counts, 10)
     flagged_runs = []
+    longest_entries = []
     with open(report_path, 'w', encoding='utf-8') as out:
-        global_idx = 0
         for chapter_idx, (title, subchapters) in enumerate(chapters, 1):
             chapter_words = sum(len(sub.split()) for sub in subchapters)
             out.write(f"[{chapter_idx}] {title}  ({chapter_words} words, {len(subchapters)} subchapters)\n")
@@ -59,9 +64,9 @@ def count_words_per_subchapter(file_path, report_path):
                 word_count = len(subchapter.split())
                 is_short = word_count < low_fence
                 flag = '*' if is_short else ' '
-                preview = subchapter[:100] + ('...' if len(subchapter) > 100 else '')
+                preview = subchapter[:80] + ('...' if len(subchapter) > 100 else '')
                 out.write(f" {flag}{sub_idx}. [{word_count}]  {preview}\n")
-                global_idx += 1
+                longest_entries.append((word_count, chapter_idx, title, sub_idx, preview))
                 if is_short:
                     if run_start is None:
                         run_start = (chapter_idx, sub_idx)
@@ -79,6 +84,11 @@ def count_words_per_subchapter(file_path, report_path):
         out.write(f"Q1: {q1:.1f}  Q3: {q3:.1f}  P10 (low fence): {low_fence:.1f}\n")
         n_flagged = sum(1 for c in all_word_counts if c < low_fence)
         out.write(f"Flagged short (*): {n_flagged} subchapters below P10 ({low_fence:.1f} words)\n")
+        if longest_entries:
+            out.write(f"\n--- Longest subchapters (top {top_n_longest}) ---\n")
+            longest_sorted = sorted(longest_entries, key=lambda e: e[0], reverse=True)[:top_n_longest]
+            for word_count, chapter_idx, title, sub_idx, preview in longest_sorted:
+                out.write(f"  [{word_count}]  ch.{chapter_idx} sub {sub_idx} ({title})  {preview}\n")
         if flagged_runs:
             out.write(f"\n--- Consecutive short subchapter runs ---\n")
             for (ch_s, sub_s), (ch_e, sub_e) in flagged_runs:
@@ -98,4 +108,3 @@ if __name__ == "__main__":
         print(f"Error: File {file_path} not found in the current directory.")
     except Exception as e:
         print(f"An error occurred: {e}")
-
