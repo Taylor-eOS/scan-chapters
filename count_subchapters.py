@@ -78,6 +78,9 @@ def count_words_per_subchapter(file_path, report_path):
             if run_start is not None:
                 flagged_runs.append((run_start, run_end))
                 run_start = None
+        out.write("\n--- Chapter lengths (subchapters per chapter) ---\n")
+        out.write(', '.join(str(len(subs)) for _, subs in chapters))
+        out.write("\n")
         out.write(f"\n--- Summary ---\n")
         out.write(f"Chapters: {len(chapters)}  Subchapters: {total_subs}  Total words: {total_words}\n")
         out.write(f"Mean: {mean:.1f}  Median: {median:.1f}  Min: {min(all_word_counts)}  Max: {max(all_word_counts)}\n")
