@@ -89,16 +89,16 @@ def count_words_per_subchapter(file_path, report_path):
             longest_sorted = sorted(longest_entries, key=lambda e: e[0], reverse=True)[:top_n_longest]
             for word_count, chapter_idx, title, sub_idx, preview in longest_sorted:
                 out.write(f"  [{word_count}]  ch.{chapter_idx} sub {sub_idx} ({title})  {preview}\n")
-        if flagged_runs:
-            out.write(f"\n--- Consecutive short subchapter runs ---\n")
-            for (ch_s, sub_s), (ch_e, sub_e) in flagged_runs:
-                length = sub_e - sub_s + 1 if ch_s == ch_e else '?'
-                if ch_s == ch_e:
-                    loc = f"ch.{ch_s} sub {sub_s}" if length == 1 else f"ch.{ch_s} subs {sub_s}-{sub_e}"
-                else:
-                    loc = f"ch.{ch_s} sub {sub_s} – ch.{ch_e} sub {sub_e}"
-                    length = sub_e - sub_s + 1
-                out.write(f"  {length}x  {loc}\n")
+        #if flagged_runs:
+        #    out.write(f"\n--- Consecutive short subchapter runs ---\n")
+        #    for (ch_s, sub_s), (ch_e, sub_e) in flagged_runs:
+        #        length = sub_e - sub_s + 1 if ch_s == ch_e else '?'
+        #        if ch_s == ch_e:
+        #            loc = f"ch.{ch_s} sub {sub_s}" if length == 1 else f"ch.{ch_s} subs {sub_s}-{sub_e}"
+        #        else:
+        #            loc = f"ch.{ch_s} sub {sub_s} – ch.{ch_e} sub {sub_e}"
+        #            length = sub_e - sub_s + 1
+        #        out.write(f"  {length}x  {loc}\n")
     print(f"Report written to {report_path}")
 
 if __name__ == "__main__":
